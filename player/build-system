@@ -98,6 +98,32 @@ EOF
 
 
 
+
+#
+# Script to run Chromium cleanly
+#
+
+cat << EOF >> /home/publicuser/run-chromium
+#!/bin/sh
+sleep 10
+
+# Start with a clean slate every time.
+rm -rf "\${HOME}/.config/chromium"
+
+
+exec chromium-browser \
+    --allow-running-insecure-content \
+    --disable-infobars \
+    --ignore-certificate-errors \
+    --kiosk \
+    --noerrdialogs \
+    --no-first-run \
+    --password-store=basic \
+    https://192.168.1.50/frontend/4
+EOF
+chmod +x /home/publicuser/run-chromium
+
+
 #
 # Configure Chromium Auto-start
 #
@@ -112,7 +138,7 @@ Encoding=UTF-8
 Name=Kiosk
 GenericName=program
 Comment=LobbyKiosk
-Exec=chromium-browser --ignore-certificate-errors --noerrdialogs --password-store=basic --allow-running-insecure-content --no-first-run --disable-infobars --kiosk https://192.168.1.50/frontend/4
+Exec=/home/publicuser/run-chromium
 Icon=/usr/share/pixmaps/program.jpg
 Terminal=false
 Type=Application
