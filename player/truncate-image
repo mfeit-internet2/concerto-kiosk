@@ -57,14 +57,14 @@ sudo umount "${MOUNT_POINT}"
 
 
 #
-# Resize the partition to a half-gigabyte larger than the minimum
+# Resize the partition to a tenth-gigabyte larger than the minimum
 #
 
 BLOCK_SIZE=$(tune2fs -l "${PART}" \
 		 | egrep -e '^Block size:' \
 		 | awk '{ print $NF }')
 
-ROOM=500000000
+ROOM=100000000
 ROOM_BLOCKS=$(echo "scale=0; ${ROOM}/${BLOCK_SIZE}" | bc)
 
 MIN_BLOCKS=$(resize2fs -P "${PART}" \
