@@ -43,5 +43,7 @@ VMDK="${VM_DIR}/${VMDK_NAME}"
 
 VBoxManage clonehd "${VMDK}" "${IMAGE}" --format RAW
 
+VBoxManage closemedium "${IMAGE}"
+
 
 # TODO: Can truncate right here, no root required.

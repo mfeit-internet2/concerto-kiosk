@@ -1,16 +1,12 @@
 #!/bin/sh -e
 #
-# Truncate a raw image to a specific size
+# Truncate a raw image to a usable size
 #
-# Usage:  truncate-image IMAGE-FILE NEW-SIZE OUTPUT-FILE
-#
-# Where NEW-SIZE is an integer in GB
+# Usage:  truncate-image IMAGE-FILE
 #
 
 
 IMAGE="$1"
-NEW_GB="$2"
-OUTPUT="$3"
 
 die()
 {
@@ -23,27 +19,85 @@ die()
 
 [ -r "${IMAGE}" ] || die "${IMAGE}: Not readable."
 
-echo "${NEW_GB}" | egrep -q -e '^[0-9]+$' \
-     || die "${NEW_GB}:  Invalid size"
 
-# TODO: Error check $OUTPUT
-
-
+#
 # Cut the (single) partition down to size
+#
+
+# Shrink the filesystem
+
+# This gets any authentication out of the way.
+sudo true
+
+LOOP=$(sudo losetup -f)
+sudo losetup -P "${LOOP}" "${IMAGE}"
+
+cleanup()
+{
+    [ "${LOOP}" ] && sudo losetup -d "${LOOP}"
+}
+trap cleanup EXIT
+
+PART="${LOOP}p1"
+
+sudo chown "$(id -un).$(id -gn)" "${PART}"
+
+#
+# Figure out how big the partition is and bump it up to the next
+# integer unit of whatever it is (e.g., 2.3G -> 3G)
+#
+
+# TODO: Make a safe mountpoint
+MOUNT_POINT=/mnt
+sudo mount "${PART}" "${MOUNT_POINT}"
+PART_SIZE_FULL=$(df -h "${MOUNT_POINT}" \
+		     | awk -v "PART=${PART}" '$1 == PART { print $3 }')
+# TODO: This should happen on exit
+sudo umount "${MOUNT_POINT}"
 
 
-# TODO: Need to get rid of the question output.
-parted ${IMAGE} resizepart 1 "${NEW_GB}G"
+#
+# Resize the partition to a half-gigabyte larger than the minimum
+#
 
-echo foo
+BLOCK_SIZE=$(tune2fs -l "${PART}" \
+		 | egrep -e '^Block size:' \
+		 | awk '{ print $NF }')
 
-BLOCK_SIZE=$(fdisk -l ${IMAGE} \
-    | egrep -e '^Units =' \
-    | sed -e 's/ [^ ]*$// ; s/^.* //')
+ROOM=500000000
+ROOM_BLOCKS=$(echo "scale=0; ${ROOM}/${BLOCK_SIZE}" | bc)
 
-VOLUME_END=$(fdisk -l "${IMAGE}" \
-    | tail -1 \
+MIN_BLOCKS=$(resize2fs -P "${PART}" \
+		 | egrep 'Estimated minimum' \
+		 | awk '{ print $NF }')
+
+NEW_BLOCKS=$(echo "${MIN_BLOCKS}+${ROOM_BLOCKS}" | bc)
+NEW_BYTES=$(echo "${NEW_BLOCKS}*${BLOCK_SIZE}" | bc)
+
+e2fsck -f "${PART}"
+resize2fs -d 32 "${PART}" "${NEW_BLOCKS}"
+
+sudo losetup -d "${LOOP}"
+LOOP=
+
+
+#
+# Truncate the file to just past the end of the partition
+#
+
+
+SECTOR_SIZE=$(fdisk -l ${IMAGE} \
+		  | egrep -e '^Units:' \
+		  | sed -e 's/ [^ ]*$// ; s/^.* //')
+NEW_SECTORS=$(echo "${NEW_BYTES}/${SECTOR_SIZE}" | bc)
+
+START_SECTOR=$(fdisk -l "${IMAGE}" \
+    | awk -v "PART=${IMAGE}1" '$1 == PART { print }' \
     | tr -d '*' \
-    | awk '{ print $3 }')
+    | awk '{ print $2 }')
 
-truncate --size "${NEW_GB}G" "${IMAGE}"
+
+END_SECTOR=$(echo "${START_SECTOR}+${NEW_SECTORS}" | bc)
+NEW_IMAGE_SIZE=$(echo "(${END_SECTOR}+1)*${SECTOR_SIZE}" | bc)
+
+echo truncate --size "${NEW_IMAGE_SIZE}" "${IMAGE}"
