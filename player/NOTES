@@ -1,0 +1,35 @@
+To build the final bootable image:
+
+Create a VM with a 4 GB disk
+
+Install CentOS Minimal
+
+Pull the build script from
+https://raw.githubusercontent.com/mfeit-internet2/concerto-kiosk/master/player/build-system
+
+Remove the 'poweroff' at the end
+
+sh -e build
+
+Shut down
+
+./extract-image
+
+
+VBoxManage clonehd $HOME/VirtualBox\ VMs/VM-NAME/*.vmdk player.img --format RAW
+VBoxManage closemedium player.img
+
+
+Burn a stick on OS X:
+
+diskutil list
+(Find disk number of stick)
+sudo dd bs=1m if=player.img of=/dev/rdiskN
+diskutil eject /dev/diskN
+
+
+To force a mac to boot USB by default:
+
+Insert the USB stick
+Power on while holding Option/Alt
+Hold Ctrl while clicking on the volume to boot.
