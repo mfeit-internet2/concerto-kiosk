@@ -1,0 +1,25 @@
+#
+# Vagrant Configuration for Concerto Kiosk
+#
+#
+
+Vagrant.configure("2") do |config|
+
+  config.vm.box = "centos/7"
+
+  config.vm.provider "virtualbox" do |vb|  
+    vb.name = "kiosk-build"
+    vb.cpus = 2
+    vb.memory = 2048
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+
+    sudo sh /vagrant/build-system
+
+  SHELL
+
+end
+
+# -*- mode: ruby -*-
+# vi: set ft=ruby :

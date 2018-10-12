@@ -1,0 +1,47 @@
+#!/bin/sh -e
+#
+# Find the VMDK for a VM and extract the image
+#
+# Usage:  extract-image VM-NAME IMAGE-FILE
+#
+
+# TODO: Error check these
+VM_NAME="$1"
+IMAGE="$2"
+
+
+die()
+{
+    echo "$@" 1>&2
+    exit 1
+}
+
+FOUND=false
+# TODO: Add the Linux equivalent
+for VBOX_DIR in "${HOME}/VirtualBox VMs"
+do
+    if [ -d "${VBOX_DIR}" ]
+    then
+	FOUND=true
+	break
+    fi
+done
+
+${FOUND} || die "Did not find VirtualBox directory"
+
+VM_DIR="${VBOX_DIR}/${VM_NAME}"
+[ -d "${VM_DIR}" ] || die "Did not find VM ${VM_NAME}"
+
+# Grab the first VMDK.
+# TODO: There should only be one.
+VMDK_NAME=$(ls "${VM_DIR}" | egrep -e '\.vmdk' | head -1)
+
+VMDK="${VM_DIR}/${VMDK_NAME}"
+
+[ -f "${VMDK}" ] || die "Couldn't find VMDK '${VMDK}'"
+
+
+VBoxManage clonehd "${VMDK}" "${IMAGE}" --format RAW
+
+
+# TODO: Can truncate right here, no root required.

@@ -1,0 +1,49 @@
+#!/bin/sh -e
+#
+# Truncate a raw image to a specific size
+#
+# Usage:  truncate-image IMAGE-FILE NEW-SIZE OUTPUT-FILE
+#
+# Where NEW-SIZE is an integer in GB
+#
+
+
+IMAGE="$1"
+NEW_GB="$2"
+OUTPUT="$3"
+
+die()
+{
+    echo "$@" 1>&2
+    exit 1
+}
+
+
+# TODO: This must be run as root.
+
+[ -r "${IMAGE}" ] || die "${IMAGE}: Not readable."
+
+echo "${NEW_GB}" | egrep -q -e '^[0-9]+$' \
+     || die "${NEW_GB}:  Invalid size"
+
+# TODO: Error check $OUTPUT
+
+
+# Cut the (single) partition down to size
+
+
+# TODO: Need to get rid of the question output.
+parted ${IMAGE} resizepart 1 "${NEW_GB}G"
+
+echo foo
+
+BLOCK_SIZE=$(fdisk -l ${IMAGE} \
+    | egrep -e '^Units =' \
+    | sed -e 's/ [^ ]*$// ; s/^.* //')
+
+VOLUME_END=$(fdisk -l "${IMAGE}" \
+    | tail -1 \
+    | tr -d '*' \
+    | awk '{ print $3 }')
+
+truncate --size "${NEW_GB}G" "${IMAGE}"

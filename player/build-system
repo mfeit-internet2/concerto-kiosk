@@ -1,0 +1,241 @@
+#!/bin/sh -e
+#
+# Build the kiosk.  Needs to be run as root.
+#
+# Based loosely on the following:
+# https://michaelwiki.geekgalaxy.com/index.php/Web_Kiosk_CentOS_7
+#
+
+
+if [ "$(id -u)" != "0" ]
+then
+    echo "Must be run as root." 1>&2
+    exit 1
+fi
+
+
+#
+# Basic setup and packages
+#
+
+yum -y update
+yum -y install epel-release
+yum makecache
+
+yum -y install \
+    chromium \
+    htop \
+    nano \
+    smartmontools \
+    wget \
+    xorg-x11-drv-\* \
+    xorg-x11-fonts-\* \
+    liberation-\* \
+    xorg-x11-server-Xorg \
+    xorg-x11-utils \
+
+
+
+yum -y group install Xfce
+
+
+#
+# Unclutter - Gets rid of the mouse pointer
+#
+
+wget -O unclutter.tar https://www.archlinux.org/packages/community/x86_64/unclutter/download/
+tar -xf unclutter.tar
+mv usr/bin/unclutter /usr/bin/unclutter
+chown root.root /usr/bin/unclutter
+chmod 755 /usr/bin/unclutter
+rm -rf usr
+
+
+#
+# Set up tty1 autologin
+#
+
+useradd publicuser
+rm /etc/systemd/system/getty.target.wants/getty@tty1.service
+cp /lib/systemd/system/getty@.service /etc/systemd/system/getty@tty1.service
+sed -i -e "s/\/sbin\/agetty/\0 --autologin publicuser/" /etc/systemd/system/getty@tty1.service
+ln -s /etc/systemd/system/getty@tty1.service /etc/systemd/system/getty.target.wants/getty@tty1.service
+
+cat << EOF >>/home/publicuser/.bash_profile
+if [[ -z \$DISPLAY ]] && [[ \$(tty) = /dev/tty1 ]]; then # Check if we have a display and we're on TTY1
+startx
+else
+echo "Please contact the help desk and provide the following"
+echo "IP : "
+echo "Hostname : $hostname"
+fi
+EOF
+
+cat << EOF >> /home/publicuser/.xinitrc
+exec startxfce4
+EOF
+chown publicuser /home/publicuser/.xinitrc
+
+
+
+#
+# Configure Unclutter Auto-start
+#
+
+cat << EOF >>/etc/xdg/autostart/unclutter.desktop
+[Desktop Entry]
+Encoding=UTF-8
+Name=Kiosk
+GenericName=program
+Comment=LobbyKiosk
+Exec=unclutter -grab
+Icon=/usr/share/pixmaps/program.jpg
+Terminal=false
+Type=Application
+Categories=
+OnlyShowIn=XFCE;
+EOF
+
+
+
+#
+# Configure Chromium Auto-start
+#
+#
+# Full list of command-line switches:
+# https://peter.sh/experiments/chromium-command-line-switches/
+#
+
+cat << EOF >> /etc/xdg/autostart/kiosk.desktop
+[Desktop Entry]
+Encoding=UTF-8
+Name=Kiosk
+GenericName=program
+Comment=LobbyKiosk
+Exec=chromium-browser --ignore-certificate-errors --noerrdialogs --password-store=basic --allow-running-insecure-content --no-first-run --disable-infobars --kiosk https://192.168.1.50/frontend/4
+Icon=/usr/share/pixmaps/program.jpg
+Terminal=false
+Type=Application
+Categories=
+OnlyShowIn=XFCE;
+EOF
+
+
+#
+# Get rid of desktop stuff
+#
+
+SESSION="/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml"
+rm -f "${SESSION}"
+cat << EOF > "${SESSION}"
+<?xml version="1.0" encoding="UTF-8"?>
+
+<channel name="xfce4-session" version="1.0">
+  <property name="general" type="empty">
+    <property name="FailsafeSessionName" type="string" value="Failsafe"/>
+  </property>
+  <property name="sessions" type="empty">
+    <property name="Failsafe" type="empty">
+      <property name="IsFailsafe" type="bool" value="true"/>
+      <property name="Count" type="int" value="5"/>
+      <property name="Client0_Command" type="array">
+        <value type="string" value="xfwm4"/>
+      </property>
+    </property>
+  </property>
+  <property name="splash" type="empty">
+    <property name="Engine" type="string" value=""/>
+  </property>
+</channel>
+EOF
+
+
+
+
+#
+# Power Settings and Mouse Pointer
+#
+
+cat << EOF >> /home/publicuser/power.sh
+#!/bin/sh
+sleep 10
+export DISPLAY=$(who | grep -E "publicuser pts\/[0-9]" | grep -Eo "\(:[0-9][.]?[0-9]?\)" | sed 's/(//; s/)//')
+#xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false
+xset -dpms
+xset s noblank
+xset s off
+
+# Do nothing until killed
+while true
+do
+    sleep 3600
+done
+EOF
+chmod +x /home/publicuser/power.sh
+
+
+PFCE=/home/publicuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
+mkdir -p $(dirname "${PFCE}")
+cat << EOF >> "${PFCE}"
+<?xml version="1.0" encoding="UTF-8"?>
+
+<channel name="xfce4-power-manager" version="1.0">
+  <property name="xfce4-power-manager" type="empty">
+    <property name="power-button-action" type="uint" value="3"/>
+    <property name="sleep-button-action" type="uint" value="3"/>
+    <property name="hibernate-button-action" type="uint" value="3"/>
+    <property name="show-tray-icon" type="bool" value="true"/>
+    <property name="lock-screen-suspend-hibernate" type="bool" value="true"/>
+    <property name="lid-action-on-battery" type="uint" value="1"/>
+    <property name="logind-handle-lid-switch" type="bool" value="true"/>
+    <property name="lid-action-on-ac" type="uint" value="1"/>
+    <property name="blank-on-ac" type="uint" value="0"/>
+  </property>
+</channel>
+EOF
+
+
+cat << EOF>>/etc/xdg/autostart/power.desktop
+[Desktop Entry]
+Encoding=UTF-8
+Name=powersettings
+GenericName=program3
+Comment=DisablePower
+Exec=/home/publicuser/power.sh
+Icon=/usr/share/pixmaps/program.jpg
+Terminal=false
+Type=Application
+Categories=
+OnlyShowIn=XFCE;
+EOF
+
+
+#
+# Make sure everything of publicuser's is owned by publicuser
+#
+
+chown -R publicuser.publicuser /home/publicuser
+
+
+
+#
+# Clean out some cruft
+#
+
+# YUM leftovers we won't need
+yum clean all
+rm -rf /var/cache/yum
+
+# No swap; we'll have enough RAM
+swapoff /swapfile
+sed -i -e '/\/swapfile/d' /etc/fstab
+rm -f /swapfile
+
+
+#
+# Shut 'er down.
+#
+echo
+echo Powering off.
+echo
+poweroff
