@@ -2,9 +2,17 @@
 #
 # Build the kiosk.  Needs to be run as root.
 #
-# Based loosely on the following:
+# Originally based loosely on the following:
 # https://michaelwiki.geekgalaxy.com/index.php/Web_Kiosk_CentOS_7
 #
+
+# Configurables
+
+ACCOUNT=kiosk
+AUTOLOGIN_TTY=tty1
+KIOSK_URL="https://192.168.1.50/frontend/5"
+
+# End configurables
 
 
 if [ "$(id -u)" != "0" ]
@@ -34,9 +42,49 @@ yum -y install \
     xorg-x11-server-Xorg \
     xorg-x11-utils \
 
-
-
 yum -y group install Xfce
+
+
+#
+# User Account
+#
+
+useradd "${ACCOUNT}"
+ACCOUNT_HOME=$(awk -v "ACCT=${ACCOUNT}" -F: '$1 == ACCT { print $6 }' \
+    /etc/passwd)
+
+
+#
+# Autologin on ${AUTOLOGIN_TTY}
+#
+
+rm -f "/etc/systemd/system/getty.target.wants/getty@${AUTOLOGIN_TTY}.service"
+
+cp \
+    /lib/systemd/system/getty@.service \
+    "/etc/systemd/system/getty@${AUTOLOGIN_TTY}.service"
+
+sed -i -e "s/\/sbin\/agetty/\0 --autologin ${ACCOUNT}/" \
+    "/etc/systemd/system/getty@${AUTOLOGIN_TTY}.service"
+
+ln -s "/etc/systemd/system/getty@${AUTOLOGIN_TTY}.service" \
+    "/etc/systemd/system/getty.target.wants/getty@${AUTOLOGIN_TTY}.service"
+
+cat << EOF >> "${ACCOUNT_HOME}/.bash_profile"
+if [[ -z \$DISPLAY ]] && [[ \$(tty) = /dev/${AUTOLOGIN_TTY} ]]; then
+    startx
+else
+    echo "Not started on ${AUTOLOGIN_TTY}; not running X."
+fi
+EOF
+
+
+
+cat << EOF >> "${ACCOUNT_HOME}/.xinitrc"
+#!/bin/sh
+
+exec startxfce4
+EOF
 
 
 #
@@ -50,44 +98,12 @@ chown root.root /usr/bin/unclutter
 chmod 755 /usr/bin/unclutter
 rm -rf usr
 
-
-#
-# Set up tty1 autologin
-#
-
-useradd publicuser
-rm /etc/systemd/system/getty.target.wants/getty@tty1.service
-cp /lib/systemd/system/getty@.service /etc/systemd/system/getty@tty1.service
-sed -i -e "s/\/sbin\/agetty/\0 --autologin publicuser/" /etc/systemd/system/getty@tty1.service
-ln -s /etc/systemd/system/getty@tty1.service /etc/systemd/system/getty.target.wants/getty@tty1.service
-
-cat << EOF >>/home/publicuser/.bash_profile
-if [[ -z \$DISPLAY ]] && [[ \$(tty) = /dev/tty1 ]]; then # Check if we have a display and we're on TTY1
-startx
-else
-echo "Please contact the help desk and provide the following"
-echo "IP : "
-echo "Hostname : $hostname"
-fi
-EOF
-
-cat << EOF >> /home/publicuser/.xinitrc
-exec startxfce4
-EOF
-chown publicuser /home/publicuser/.xinitrc
-
-
-
-#
-# Configure Unclutter Auto-start
-#
-
 cat << EOF >>/etc/xdg/autostart/unclutter.desktop
 [Desktop Entry]
 Encoding=UTF-8
 Name=Kiosk
 GenericName=program
-Comment=LobbyKiosk
+Comment=Kiosk
 Exec=unclutter -grab
 Icon=/usr/share/pixmaps/program.jpg
 Terminal=false
@@ -98,53 +114,60 @@ EOF
 
 
 
-
 #
 # Script to run Chromium cleanly
 #
 
-cat << EOF >> /home/publicuser/run-chromium
+cat << EOF >> "${ACCOUNT_HOME}/run-chromium"
 #!/bin/sh
+
 sleep 10
 
-# Start with a clean slate every time.
-rm -rf "\${HOME}/.config/chromium"
+# Do everything repeatedly
 
+while true
+do
 
-exec chromium-browser \
-    --allow-running-insecure-content \
-    --disable-infobars \
-    --ignore-certificate-errors \
-    --kiosk \
-    --noerrdialogs \
-    --no-first-run \
-    --password-store=basic \
-    https://192.168.1.50/frontend/4
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false
+    xset -dpms
+    xset s noblank
+    xset s off
+    xset s 0
+
+    # Start with a clean slate every time.
+    rm -rf "\${HOME}/.config/chromium"
+
+    # Full list of command-line switches:
+    # https://peter.sh/experiments/chromium-command-line-switches/
+    chromium-browser \
+        --allow-running-insecure-content \
+        --disable-infobars \
+        --ignore-certificate-errors \
+        --kiosk \
+        --noerrdialogs \
+        --no-first-run \
+        --password-store=basic \
+        "${KIOSK_URL}"
+
+done
 EOF
-chmod +x /home/publicuser/run-chromium
+chmod +x "${ACCOUNT_HOME}/run-chromium"
 
 
-#
-# Configure Chromium Auto-start
-#
-#
-# Full list of command-line switches:
-# https://peter.sh/experiments/chromium-command-line-switches/
-#
-
-cat << EOF >> /etc/xdg/autostart/kiosk.desktop
+cat << EOF >> /etc/xdg/autostart/chromium.desktop
 [Desktop Entry]
 Encoding=UTF-8
 Name=Kiosk
 GenericName=program
-Comment=LobbyKiosk
-Exec=/home/publicuser/run-chromium
+Comment=Chromium
+Exec=${ACCOUNT_HOME}/run-chromium
 Icon=/usr/share/pixmaps/program.jpg
 Terminal=false
 Type=Application
 Categories=
 OnlyShowIn=XFCE;
 EOF
+
 
 
 #
@@ -177,43 +200,24 @@ EOF
 
 
 
-
 #
-# Power Settings and Mouse Pointer
+# Disable as much power management as possible
 #
 
-cat << EOF >> /home/publicuser/power.sh
-#!/bin/sh
-sleep 10
-export DISPLAY=$(who | grep -E "publicuser pts\/[0-9]" | grep -Eo "\(:[0-9][.]?[0-9]?\)" | sed 's/(//; s/)//')
-#xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false
-xset -dpms
-xset s noblank
-xset s off
-
-# Do nothing until killed
-while true
-do
-    sleep 3600
-done
-EOF
-chmod +x /home/publicuser/power.sh
-
-
-PFCE=/home/publicuser/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
+PFCE="${ACCOUNT_HOME}/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml"
 mkdir -p $(dirname "${PFCE}")
 cat << EOF >> "${PFCE}"
 <?xml version="1.0" encoding="UTF-8"?>
 
 <channel name="xfce4-power-manager" version="1.0">
   <property name="xfce4-power-manager" type="empty">
-    <property name="power-button-action" type="uint" value="3"/>
+    <property name="power-button-action" type="uint" value="4"/>
     <property name="sleep-button-action" type="uint" value="3"/>
     <property name="hibernate-button-action" type="uint" value="3"/>
-    <property name="show-tray-icon" type="bool" value="true"/>
-    <property name="lock-screen-suspend-hibernate" type="bool" value="true"/>
+    <property name="show-tray-icon" type="bool" value="false"/>
+    <property name="lock-screen-suspend-hibernate" type="bool" value="false"/>
     <property name="lid-action-on-battery" type="uint" value="1"/>
-    <property name="logind-handle-lid-switch" type="bool" value="true"/>
+    <property name="logind-handle-lid-switch" type="bool" value="false"/>
     <property name="lid-action-on-ac" type="uint" value="1"/>
     <property name="blank-on-ac" type="uint" value="0"/>
   </property>
@@ -221,26 +225,13 @@ cat << EOF >> "${PFCE}"
 EOF
 
 
-cat << EOF>>/etc/xdg/autostart/power.desktop
-[Desktop Entry]
-Encoding=UTF-8
-Name=powersettings
-GenericName=program3
-Comment=DisablePower
-Exec=/home/publicuser/power.sh
-Icon=/usr/share/pixmaps/program.jpg
-Terminal=false
-Type=Application
-Categories=
-OnlyShowIn=XFCE;
-EOF
 
 
 #
-# Make sure everything of publicuser's is owned by publicuser
+# Make sure everything in the account is owned by the account
 #
 
-chown -R publicuser.publicuser /home/publicuser
+chown -R "${ACCOUNT}.${ACCOUNT}" "${ACCOUNT_HOME}"
 
 
 
