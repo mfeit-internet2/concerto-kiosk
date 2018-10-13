@@ -234,6 +234,14 @@ EOF
 chown -R "${ACCOUNT}.${ACCOUNT}" "${ACCOUNT_HOME}"
 
 
+#
+# Force all Ethernet interfaces to enabled on boot
+#
+
+find /etc/sysconfig/network-scripts -name "ifcfg-*" \
+    | xargs egrep -l "TYPE=Ethernet" \
+    | xargs -r sed -i -e 's/ONBOOT=no/ONBOOT=yes/g'
+
 
 #
 # Clean out some cruft
