@@ -1,0 +1,84 @@
+#!/bin/sh -e
+#
+# Build the server.  Needs to be run as root.
+#
+
+
+# Configurables
+
+ACCOUNT=concerto
+
+# End configurables
+
+
+if [ "$(id -u)" != "0" ]
+then
+    echo "Must be run as root." 1>&2
+    exit 1
+fi
+
+
+#
+# Basic setup and packages
+#
+
+wget -q https://www.virtualbox.org/download/oracle_vbox.asc -O- | rpm --import -
+wget -q https://download.virtualbox.org/virtualbox/rpm/el/virtualbox.repo \
+    -O /etc/yum.repos.d/virtualbox.repo
+yum -y install epel-release
+yum makecache
+yum -y update
+
+yum -y install \
+    VirtualBox \
+    VirtualBox-guest-additions \
+    \
+    xorg-x11-drv-\* \
+    xorg-x11-fonts-\* \
+    liberation-\* \
+    xorg-x11-server-Xorg \
+    xorg-x11-utils \
+
+yum -y group install Xfce
+
+
+#
+# User Account
+#
+
+useradd "${ACCOUNT}"
+ACCOUNT_HOME=$(awk -v "ACCT=${ACCOUNT}" -F: '$1 == ACCT { print $6 }' \
+    /etc/passwd)
+
+
+
+cat << EOF >> "${ACCOUNT_HOME}/.xinitrc"
+#!/bin/sh
+exec startxfce4
+EOF
+
+
+#
+# Make sure everything in the account is owned by the account
+#
+
+chown -R "${ACCOUNT}.${ACCOUNT}" "${ACCOUNT_HOME}"
+
+
+#
+# Force all Ethernet interfaces to enabled on boot
+#
+
+find /etc/sysconfig/network-scripts -name "ifcfg-*" \
+    | xargs egrep -l "TYPE=Ethernet" \
+    | xargs -r sed -i -e 's/ONBOOT=no/ONBOOT=yes/g'
+
+
+#
+# Clean out some cruft
+#
+
+# No swap; we'll have enough RAM
+swapoff /swapfile
+sed -i -e '/\/swapfile/d' /etc/fstab
+rm -f /swapfile
